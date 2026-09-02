@@ -1,0 +1,22 @@
+[Unit]
+Description=DSH (DeepSeek Harness) Web UI + dsh-proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/path/to/dsh-server-setup
+ExecStart=/path/to/dsh-server-setup/run.sh
+Restart=always
+RestartSec=5
+Environment=DSH_HOME=/home/YOUR_USER/.dsh
+Environment=DSH_PORT=3079
+Environment=PROXY_PORT=3080
+# Uncomment and set for Basic Auth:
+# Environment=PROXY_USERNAME=admin
+# Environment=PROXY_PASSWORD=your-secure-password
+
+[Install]
+WantedBy=multi-user.target

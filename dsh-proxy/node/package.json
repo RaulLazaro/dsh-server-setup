@@ -1,0 +1,12 @@
+{
+  "name": "dsh-proxy",
+  "version": "1.0.0",
+  "description": "Reverse proxy for DeepSeek Harness with WebSocket, Basic Auth, and loopback trust",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}
