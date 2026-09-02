@@ -131,7 +131,9 @@ This proxy does **not** handle HTTPS. For production, put a TLS terminator in fr
 
 ## Reverse Proxy Features
 
-The included proxy (`dsh-proxy`) does more than simple forwarding:
+The included proxy is adapted from [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). The standalone Node.js version is used here. The original project also offers a DSH plugin version with a settings page, and Go builds for lighter deployments.
+
+Key features of the proxy:
 
 ### `crypto.randomUUID` polyfill
 DSH's frontend uses `crypto.randomUUID()` for RPC IDs, but this API is only available in secure contexts (HTTPS/localhost). When accessing via LAN IP or public URL, the polyfill injects a compatible implementation using `getRandomValues()`.
@@ -181,6 +183,11 @@ sudo systemctl start cron-telegram-bridge
 ## Plugins
 
 See [PLUGINS.md](PLUGINS.md) for a full list of installed plugins with descriptions.
+
+## Credits
+
+- **Reverse proxy** — adapted from [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). The original project also provides a [DSH plugin version](https://github.com/smanx/dsh-proxy#dsh-plugin-recommended--dsh-proxy) with a settings page, and [Go builds](https://github.com/smanx/dsh-proxy/releases) for lighter standalone deployments.
+- **DSH** — [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) by DeepSeek AI
 
 ## License
 

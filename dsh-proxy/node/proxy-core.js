@@ -1,6 +1,7 @@
 'use strict';
 // Reverse proxy core: HTTP + WebSocket with Basic Auth, Origin alignment,
 // crypto.randomUUID polyfill injection (HTML), and DSH loopback trust patch (JS).
+// Adapted from https://github.com/smanx/dsh-proxy (MIT license)
 const http = require('http');
 const os = require('os');
 const httpProxy = require('http-proxy');
