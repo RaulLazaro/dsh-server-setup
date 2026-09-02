@@ -178,6 +178,10 @@ sudo systemctl start cron-telegram-bridge
 - Check the proxy is using the patched `proxy-core.js`
 - Clear browser cache and reload
 
+## Plugins
+
+See [PLUGINS.md](PLUGINS.md) for a full list of installed plugins with descriptions.
+
 ## License
 
 MIT
