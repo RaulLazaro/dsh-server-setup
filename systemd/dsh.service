@@ -1,5 +1,5 @@
 [Unit]
-Description=DSH (DeepSeek Harness) Web UI + dsh-proxy
+Description=DSH (DeepSeek Harness) Web UI
 After=network-online.target
 Wants=network-online.target
 
@@ -13,10 +13,6 @@ Restart=always
 RestartSec=5
 Environment=DSH_HOME=/home/ubuntu/.dsh
 Environment=DSH_PORT=3079
-Environment=PROXY_PORT=3080
-# Uncomment and set for Basic Auth:
-# Environment=PROXY_USERNAME=admin
-# Environment=PROXY_PASSWORD=your-secure-password
 
 [Install]
 WantedBy=multi-user.target

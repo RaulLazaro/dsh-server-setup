@@ -9,6 +9,12 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 | `@deepseek-ai/dsh-base` | DSH core bundle (bundled) |
 | `@deepseek-ai/dsh-web-app` | DSH web UI shell (bundled) |
 
+## Network & Access
+
+| Plugin | Description |
+|--------|-------------|
+| `@smanx/dsh-proxy` | Reverse proxy — HTTP + WebSocket with Basic Auth, `crypto.randomUUID` polyfill, and loopback trust patch. Configurable from Settings → LAN Proxy |
+
 ## UI & Navigation
 
 | Plugin | Description |
@@ -102,8 +108,8 @@ PWA support for DSH. Adds offline caching and install-as-app capability.
 
 ## Stats
 
-- **Total plugins:** 22 (including core)
-- **Custom plugins:** 2
+- **Total plugins:** 23 (including core)
+- **Custom plugins:** 2 (dsh-preview-plugin, dsh-pwa-plugin)
 - **Server:** Oracle Cloud ARM64, Ubuntu 24.04
 - **Node.js:** v24 (via fnm)
-- **Access:** Reverse proxy on port 3080
+- **Access:** dsh-proxy plugin on port 3080

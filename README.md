@@ -1,11 +1,11 @@
 # DSH Server Setup
 
-Run [DeepSeek Harness](https://github.com/deepseek-ai/dsh) on a remote VPS with reverse proxy, systemd service, and optional Basic Auth.
+Run [DeepSeek Harness](https://github.com/deepseek-ai/dsh) on a remote VPS with reverse proxy as a DSH plugin.
 
 This is a production-tested setup for running DSH on an Ubuntu server (ARM64 or x64) with:
 
 - **systemd service** — auto-restart, logging, persistence
-- **Reverse proxy** — HTTP + WebSocket with `crypto.randomUUID` polyfill and loopback trust patch
+- **Reverse proxy plugin** — [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) runs inside DSH, configurable from Settings
 - **Basic Auth** (optional) — protect your instance from unauthorized access
 - **Telegram bridge** (optional) — notifications and cron alerts to your phone
 
@@ -15,14 +15,16 @@ This is a production-tested setup for running DSH on an Ubuntu server (ARM64 or 
 Browser/Phone
      │
      ▼
-dsh-proxy (0.0.0.0:3080)  ← Basic Auth + WebSocket + polyfills
+DSH (0.0.0.0:3080)        ← dsh-proxy plugin handles external access
      │
      ▼
-DSH (127.0.0.1:3079)      ← bound to localhost only
+DSH core (127.0.0.1:3079) ← internal port
      │
      ▼
 DeepSeek API / MCP servers / Filesystem
 ```
+
+The proxy runs as a DSH plugin — no separate process needed. It starts and stops with `dsh web`.
 
 ## Quick Start
 
@@ -39,28 +41,64 @@ npm install -g pnpm
 
 # DSH
 npm install -g @deepseek-ai/dsh
-
-# http-proxy (for the reverse proxy)
-cd dsh-proxy/node && npm install
 ```
 
-### 2. Clone this repo
+### 2. Create a web profile
 
 ```bash
-git clone git@github.com:YOUR_USER/dsh-server-setup.git
-cd dsh-server-setup
+mkdir -p ~/.dsh/profiles/web
+cd ~/.dsh/profiles/web
 ```
 
-### 3. Configure
-
-Copy the example env and edit:
+### 3. Add plugins
 
 ```bash
-cp .env.example .env
-# Edit .env with your settings
+# Core (already installed with dsh)
+# Reverse proxy
+pnpm add github:smanx/dsh-proxy
+
+# Your other plugins
+pnpm add dshmarket dsh-cron dsh-mnemon dsh-free-search dsh-config-manager ...
 ```
 
-### 4. Install the systemd service
+### 4. Configure the profile
+
+**`~/.dsh/profiles/web/package.json`:**
+
+```json
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "@smanx/dsh-proxy": "github:smanx/dsh-proxy",
+    "dshmarket": "^1.39.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@smanx/dsh-proxy",
+        "dshmarket"
+      ]
+    }
+  }
+}
+```
+
+**`~/.dsh/profiles/web/cordis.patch.yml`:**
+
+```yaml
+# dsh-proxy: reverse proxy for LAN/remote access
+- id: dsh-proxy
+  name: "@smanx/dsh-proxy"
+  config:
+    listenPort: 3080
+    # username: admin       # Uncomment to enable Basic Auth
+    # password: changeme    # Uncomment to enable Basic Auth
+```
+
+### 5. Install the systemd service
 
 ```bash
 sudo cp systemd/dsh.service /etc/systemd/system/
@@ -69,7 +107,7 @@ sudo systemctl enable dsh
 sudo systemctl start dsh
 ```
 
-### 5. Verify
+### 6. Verify
 
 ```bash
 # Check DSH is running
@@ -79,51 +117,31 @@ curl -s http://127.0.0.1:3079/ | head -5
 curl -s http://YOUR_SERVER_IP:3080/ | head -5
 ```
 
-## Files
-
-```
-dsh-server-setup/
-├── README.md                    # This file
-├── .env.example                 # Environment variables template
-├── run.sh                       # DSH + proxy wrapper script
-├── systemd/
-│   └── dsh.service              # Systemd unit file
-├── dsh-proxy/
-│   └── node/
-│       ├── index.js             # Proxy entry point
-│       ├── proxy-core.js        # HTTP + WebSocket reverse proxy
-│       └── package.json         # Dependencies (http-proxy)
-└── scripts/
-    ├── setup.sh                 # First-time setup script
-    └── update.sh                # Update script
-```
-
 ## Configuration
 
-### Environment Variables
+### Proxy Settings (via UI)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DSH_PORT` | `3079` | DSH listen port (localhost only) |
-| `PROXY_PORT` | `3080` | Proxy listen port (0.0.0.0) |
-| `DSH_HOME` | `~/.dsh` | DSH home directory |
-| `PROXY_USERNAME` | *(empty)* | Basic Auth username (empty = no auth) |
-| `PROXY_PASSWORD` | *(empty)* | Basic Auth password |
+Go to **Settings → LAN Proxy** in the DSH web GUI to:
 
-### Basic Auth
+- Start/stop the proxy
+- Change the listen port
+- Set username and password for Basic Auth
+- View connection status
 
-To enable authentication, set both `PROXY_USERNAME` and `PROXY_PASSWORD` in the systemd service or `.env`:
+### Proxy Settings (via cordis.patch.yml)
 
-```ini
-Environment=PROXY_USERNAME=admin
-Environment=PROXY_PASSWORD=your-secure-password
+```yaml
+- id: dsh-proxy
+  name: "@smanx/dsh-proxy"
+  config:
+    listenPort: 3080        # External port (0.0.0.0)
+    username: admin         # Basic Auth username (empty = disabled)
+    password: changeme      # Basic Auth password
 ```
-
-Without auth, anyone with the URL can access your DSH instance.
 
 ### HTTPS
 
-This proxy does **not** handle HTTPS. For production, put a TLS terminator in front:
+The proxy does **not** handle HTTPS. For production, put a TLS terminator in front:
 
 - **Cloudflare Tunnel** — `cloudflared tunnel --url http://127.0.0.1:3080`
 - **Caddy** — auto HTTPS with `reverse_proxy localhost:3080`
@@ -131,9 +149,7 @@ This proxy does **not** handle HTTPS. For production, put a TLS terminator in fr
 
 ## Reverse Proxy Features
 
-The included proxy is adapted from [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). The standalone Node.js version is used here. The original project also offers a DSH plugin version with a settings page, and Go builds for lighter deployments.
-
-Key features of the proxy:
+The proxy ([smanx/dsh-proxy](https://github.com/smanx/dsh-proxy), MIT license) provides:
 
 ### `crypto.randomUUID` polyfill
 DSH's frontend uses `crypto.randomUUID()` for RPC IDs, but this API is only available in secure contexts (HTTPS/localhost). When accessing via LAN IP or public URL, the polyfill injects a compatible implementation using `getRandomValues()`.
@@ -166,10 +182,10 @@ sudo systemctl start cron-telegram-bridge
 - Verify Node.js is in PATH: `which node`
 - Check DSH home exists: `ls ~/.dsh/`
 
-### Proxy returns 502
-- DSH may not be ready yet (wait 10-30 seconds after start)
-- Check DSH is listening: `curl http://127.0.0.1:3079/`
-- Check ports: `ss -tlnp | grep -E '3079|3080'`
+### Proxy not accessible
+- Check if the plugin loaded: Settings → Plugins → dsh-proxy
+- Check port is open: `ss -tlnp | grep 3080`
+- Check firewall: `sudo ufw allow 3080/tcp`
 
 ### WebSocket not working
 - The proxy must forward `Upgrade` and `Connection` headers
@@ -177,8 +193,24 @@ sudo systemctl start cron-telegram-bridge
 
 ### Settings page shows "unavailable in this browser"
 - The loopback patch may not be applied
-- Check the proxy is using the patched `proxy-core.js`
+- Check the proxy plugin is enabled in Settings → Plugins
 - Clear browser cache and reload
+
+## Files
+
+```
+dsh-server-setup/
+├── README.md                    # This file
+├── PLUGINS.md                   # Plugin stack list
+├── run.sh                       # DSH wrapper script
+├── systemd/
+│   └── dsh.service              # Systemd unit file
+└── dsh-proxy/                   # Standalone proxy (alternative)
+    └── node/
+        ├── index.js
+        ├── proxy-core.js
+        └── package.json
+```
 
 ## Plugins
 
@@ -186,7 +218,7 @@ See [PLUGINS.md](PLUGINS.md) for a full list of installed plugins with descripti
 
 ## Credits
 
-- **Reverse proxy** — adapted from [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). The original project also provides a [DSH plugin version](https://github.com/smanx/dsh-proxy#dsh-plugin-recommended--dsh-proxy) with a settings page, and [Go builds](https://github.com/smanx/dsh-proxy/releases) for lighter standalone deployments.
+- **Reverse proxy** — [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). Also provides [Go builds](https://github.com/smanx/dsh-proxy/releases) for standalone deployments.
 - **DSH** — [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) by DeepSeek AI
 
 ## License
