@@ -139,13 +139,75 @@ Go to **Settings → LAN Proxy** in the DSH web GUI to:
     password: changeme      # Basic Auth password
 ```
 
-### HTTPS
+### HTTPS / Remote Access
 
 The proxy does **not** handle HTTPS. For production, put a TLS terminator in front:
 
+- **[Pangolin](https://github.com/fosrl/pangolin)** (recommended) — self-hosted identity-aware VPN + reverse proxy with WireGuard, dashboard, and access control
 - **Cloudflare Tunnel** — `cloudflared tunnel --url http://127.0.0.1:3080`
 - **Caddy** — auto HTTPS with `reverse_proxy localhost:3080`
 - **Nginx + Let's Encrypt** — standard reverse proxy config
+
+#### Pangolin Setup
+
+[Pangolin](https://github.com/fosrl/pangolin) (22k+ stars) is a self-hosted tunnel that gives you HTTPS + authentication + WireGuard VPN without opening ports. It runs as Docker containers on the same VPS.
+
+**1. Install Pangolin:**
+
+```bash
+# Clone and install
+git clone https://github.com/fosrl/pangolin.git ~/pangolin
+cd ~/pangolin
+bash install.sh
+```
+
+**2. Configure (~/pangolin/config/config.yml):**
+
+```yaml
+domain: yourdomain.com
+
+# TLS (Let's Encrypt or custom cert)
+letsencrypt:
+  email: you@yourdomain.com
+  useLetsEncrypt: true
+
+# Flask secret (generate with: openssl rand -hex 32)
+flask_secret: <random-secret>
+jwt_secret: <random-secret>
+```
+
+**3. Add DSH resource in Pangolin dashboard:**
+
+1. Open `https://yourdomain.com` → login
+2. Go to **Resources** → **New Resource**
+3. Set:
+   - Name: `dsh`
+   - Protocol: `HTTP`
+   - Target IP: `127.0.0.1`
+   - Target Port: `3080`
+4. Create a **Target** (the Gerbil client) and generate a config
+5. On your VPS, add the Gerbil client:
+
+```bash
+# Add the client config from the Pangolin dashboard
+sudo nano /etc/pangolin/client/config.yml
+sudo systemctl restart pangolin-client
+```
+
+**4. Access DSH:**
+
+```
+https://dsh.yourdomain.com
+```
+
+Your DSH instance is now accessible over HTTPS with Pangolin's authentication layer on top.
+
+**Advantages over direct proxy:**
+- HTTPS with automatic Let's Encrypt certificates
+- Built-in authentication (email-based or SSO)
+- WireGuard VPN option for full network access
+- Access control and audit logs
+- No need to open additional ports
 
 ## Reverse Proxy Features
 
@@ -219,6 +281,7 @@ See [PLUGINS.md](PLUGINS.md) for a full list of installed plugins with descripti
 ## Credits
 
 - **Reverse proxy** — [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) (MIT license). Also provides [Go builds](https://github.com/smanx/dsh-proxy/releases) for standalone deployments.
+- **Remote access** — [Pangolin](https://github.com/fosrl/pangolin) (self-hosted VPN + reverse proxy with WireGuard)
 - **DSH** — [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) by DeepSeek AI
 
 ## License
