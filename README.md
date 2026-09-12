@@ -4,10 +4,13 @@ Run [DeepSeek Harness](https://github.com/deepseek-ai/dsh) on a remote VPS with 
 
 This is a production-tested setup for running DSH on an Ubuntu server (ARM64 or x64) with:
 
+## Features
+
 - **systemd service** — auto-restart, logging, persistence
 - **Reverse proxy plugin** — [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) runs inside DSH, configurable from Settings
 - **Basic Auth** (optional) — protect your instance from unauthorized access
-- **Telegram bridge** (optional) — notifications and cron alerts to your phone
+- **File upload & preview** — built-in in DSH 0.1.5+
+- **PWA support** — install-as-app via custom plugin
 
 ## Architecture
 
@@ -225,17 +228,16 @@ The proxy forwards WebSocket connections for real-time DSH features (streaming, 
 ### Public path whitelist
 `/manifest.webmanifest`, `/favicon.svg`, and `/favicon.ico` are served without auth so browsers can fetch PWA metadata without credentials.
 
-## Telegram Integration (Optional)
+## Telegram Integration (Not Working with DSH 0.1.5)
 
-For cron notifications to Telegram, see the `cron-telegram-bridge` setup:
+**⚠️ Telegram plugins are currently broken with DSH 0.1.5-rc.1.**
 
-```bash
-# Create the bridge script at ~/.dsh/scripts/cron-telegram-bridge.js
-# Create systemd service
-sudo cp systemd/cron-telegram-bridge.service /etc/systemd/system/
-sudo systemctl enable cron-telegram-bridge
-sudo systemctl start cron-telegram-bridge
-```
+- `dsh-telegram` v0.2.0 — Host-side `apply()` never executes
+- `dsh-telegram-bridge` — depends on `apiProxy` which doesn't exist in DSH 0.1.5
+
+**Status:** Waiting for updated plugins or DSH to restore compatibility.
+
+For cron notifications, you can use `@goodandready/dsh-cron` with its built-in Telegram delivery (when it works with DSH 0.1.5).
 
 ## Troubleshooting
 
@@ -257,6 +259,22 @@ sudo systemctl start cron-telegram-bridge
 - The loopback patch may not be applied
 - Check the proxy plugin is enabled in Settings → Plugins
 - Clear browser cache and reload
+
+## OpenCode Go Session Header
+
+OpenCode Go requires an `x-opencode-session` header for per-conversation routing. DSH doesn't send this natively.
+
+**Workaround** (in `~/.dsh/settings.yaml`):
+
+```yaml
+llm-pi-ai:
+  providers:
+    opencode-go:
+      headers:
+        x-opencode-session: "dsh-global"
+```
+
+**Status:** PR proposed at [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) adding `sessionHeader` config field for dynamic per-session IDs.
 
 ## Files
 
