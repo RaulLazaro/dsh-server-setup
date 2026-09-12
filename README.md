@@ -9,8 +9,9 @@ This is a production-tested setup for running DSH on an Ubuntu server (ARM64 or 
 - **systemd service** — auto-restart, logging, persistence
 - **Reverse proxy plugin** — [smanx/dsh-proxy](https://github.com/smanx/dsh-proxy) runs inside DSH, configurable from Settings
 - **Basic Auth** (optional) — protect your instance from unauthorized access
-- **File upload & preview** — built-in in DSH 0.1.5+
+- **File upload & preview** — built-in in DSH 0.1.5+ (no plugin needed)
 - **PWA support** — install-as-app via custom plugin
+- **Trusted host** — remote access via domain name without token in URL
 
 ## Architecture
 
@@ -34,7 +35,7 @@ The proxy runs as a DSH plugin — no separate process needed. It starts and sto
 ### 1. Install prerequisites
 
 ```bash
-# Node.js (via fnm or nvm)
+# Node.js 24+ (via fnm recommended)
 curl -fsSL https://fnm.vercel.app/install | bash
 source ~/.bashrc
 fnm install 24
@@ -43,7 +44,7 @@ fnm install 24
 npm install -g pnpm
 
 # DSH
-npm install -g @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh@0.1.5-rc.1
 ```
 
 ### 2. Create a web profile
@@ -56,12 +57,11 @@ cd ~/.dsh/profiles/web
 ### 3. Add plugins
 
 ```bash
-# Core (already installed with dsh)
 # Reverse proxy
 pnpm add github:smanx/dsh-proxy
 
-# Your other plugins
-pnpm add dshmarket dsh-cron dsh-mnemon dsh-free-search dsh-config-manager ...
+# Other recommended plugins
+pnpm add dshmarket dsh-mnemon dsh-free-search dsh-config-manager dsh-mcp-sync
 ```
 
 ### 4. Configure the profile
@@ -74,7 +74,7 @@ pnpm add dshmarket dsh-cron dsh-mnemon dsh-free-search dsh-config-manager ...
   "private": true,
   "dependencies": {
     "@smanx/dsh-proxy": "github:smanx/dsh-proxy",
-    "dshmarket": "^1.39.0"
+    "dshmarket": "^1.45.1"
   },
   "dsh": {
     "profile": {
@@ -101,7 +101,18 @@ pnpm add dshmarket dsh-cron dsh-mnemon dsh-free-search dsh-config-manager ...
     # password: changeme    # Uncomment to enable Basic Auth
 ```
 
-### 5. Install the systemd service
+### 5. Configure credentials
+
+Create `~/.dsh/.credentials.yaml`:
+
+```yaml
+version: 1
+refs:
+  OPENCODE_GO_API_KEY: sk-your-api-key-here
+records: {}
+```
+
+### 6. Install the systemd service
 
 ```bash
 sudo cp systemd/dsh.service /etc/systemd/system/
@@ -110,7 +121,7 @@ sudo systemctl enable dsh
 sudo systemctl start dsh
 ```
 
-### 6. Verify
+### 7. Verify
 
 ```bash
 # Check DSH is running
@@ -118,6 +129,21 @@ curl -s http://127.0.0.1:3079/ | head -5
 
 # Check proxy is accessible
 curl -s http://YOUR_SERVER_IP:3080/ | head -5
+
+# Check logs
+journalctl -u dsh -f
+```
+
+## Updating DSH
+
+The `update_all.sh` script handles updates automatically via cron. To update manually:
+
+```bash
+# Update DSH
+npm install -g @deepseek-ai/dsh@latest
+
+# Restart service
+sudo systemctl restart dsh
 ```
 
 ## Configuration
@@ -151,32 +177,29 @@ The proxy does **not** handle HTTPS. For production, put a TLS terminator in fro
 - **Caddy** — auto HTTPS with `reverse_proxy localhost:3080`
 - **Nginx + Let's Encrypt** — standard reverse proxy config
 
-#### Pangolin Setup
+### Pangolin Setup
 
-[Pangolin](https://github.com/fosrl/pangolin) (22k+ stars) is a self-hosted tunnel that gives you HTTPS + authentication + WireGuard VPN without opening ports. It runs as Docker containers on the same VPS.
+[Pangolin](https://github.com/fosrl/pangolin) is a self-hosted tunnel that gives you HTTPS + authentication + WireGuard VPN without opening ports. It runs as Docker containers on the same VPS.
 
 **1. Install Pangolin:**
 
 ```bash
-# Clone and install
 git clone https://github.com/fosrl/pangolin.git ~/pangolin
 cd ~/pangolin
 bash install.sh
 ```
 
-**2. Configure (~/pangolin/config/config.yml):**
+**2. Configure (`~/pangolin/config/config.yml`):**
 
 ```yaml
 domain: yourdomain.com
 
-# TLS (Let's Encrypt or custom cert)
 letsencrypt:
   email: you@yourdomain.com
   useLetsEncrypt: true
 
-# Flask secret (generate with: openssl rand -hex 32)
-flask_secret: <random-secret>
-jwt_secret: <random-secret>
+flask_secret: <random-secret>  # Generate with: openssl rand -hex 32
+jwt_secret: <random-secret>    # Generate with: openssl rand -hex 32
 ```
 
 **3. Add DSH resource in Pangolin dashboard:**
@@ -192,7 +215,6 @@ jwt_secret: <random-secret>
 5. On your VPS, add the Gerbil client:
 
 ```bash
-# Add the client config from the Pangolin dashboard
 sudo nano /etc/pangolin/client/config.yml
 sudo systemctl restart pangolin-client
 ```
@@ -202,8 +224,6 @@ sudo systemctl restart pangolin-client
 ```
 https://dsh.yourdomain.com
 ```
-
-Your DSH instance is now accessible over HTTPS with Pangolin's authentication layer on top.
 
 **Advantages over direct proxy:**
 - HTTPS with automatic Let's Encrypt certificates
@@ -220,7 +240,7 @@ The proxy ([smanx/dsh-proxy](https://github.com/smanx/dsh-proxy), MIT license) p
 DSH's frontend uses `crypto.randomUUID()` for RPC IDs, but this API is only available in secure contexts (HTTPS/localhost). When accessing via LAN IP or public URL, the polyfill injects a compatible implementation using `getRandomValues()`.
 
 ### Loopback trust patch
-DSH 0.1.1+ checks `location.hostname` to determine if the browser is local. Non-loopback hosts get degraded behavior (memory-only mode, no settings). The proxy patches the client JS to treat proxied connections as loopback, enabling full functionality.
+DSH checks `location.hostname` to determine if the browser is local. Non-loopback hosts get degraded behavior (memory-only mode, no settings). The proxy patches the client JS to treat proxied connections as loopback, enabling full functionality.
 
 ### WebSocket support
 The proxy forwards WebSocket connections for real-time DSH features (streaming, live updates).
@@ -228,37 +248,22 @@ The proxy forwards WebSocket connections for real-time DSH features (streaming, 
 ### Public path whitelist
 `/manifest.webmanifest`, `/favicon.svg`, and `/favicon.ico` are served without auth so browsers can fetch PWA metadata without credentials.
 
-## Telegram Integration (Not Working with DSH 0.1.5)
+## DSH 0.1.5 Changes
 
-**⚠️ Telegram plugins are currently broken with DSH 0.1.5-rc.1.**
+### Built-in features (no plugins needed)
+- **File upload** — drag & drop or paste images directly in chat
+- **File preview** — sidebar with syntax highlighting, PDF, images
+- **Sidebar** — multi-tab, split view, fullscreen for files and deliverables
 
+### Removed features
+- **Telegram integration** — both `dsh-telegram` and `dsh-telegram-bridge` are broken with DSH 0.1.5
+- **Cron scheduler** — `dsh-cron` Host-side doesn't start
+- **Webhook** — removed, was used with cron
+
+### Known issues
 - `dsh-telegram` v0.2.0 — Host-side `apply()` never executes
 - `dsh-telegram-bridge` — depends on `apiProxy` which doesn't exist in DSH 0.1.5
-
-**Status:** Waiting for updated plugins or DSH to restore compatibility.
-
-For cron notifications, you can use `@goodandready/dsh-cron` with its built-in Telegram delivery (when it works with DSH 0.1.5).
-
-## Troubleshooting
-
-### DSH won't start
-- Check logs: `journalctl -u dsh -f`
-- Verify Node.js is in PATH: `which node`
-- Check DSH home exists: `ls ~/.dsh/`
-
-### Proxy not accessible
-- Check if the plugin loaded: Settings → Plugins → dsh-proxy
-- Check port is open: `ss -tlnp | grep 3080`
-- Check firewall: `sudo ufw allow 3080/tcp`
-
-### WebSocket not working
-- The proxy must forward `Upgrade` and `Connection` headers
-- If behind another proxy (nginx/Caddy), ensure WebSocket is enabled there too
-
-### Settings page shows "unavailable in this browser"
-- The loopback patch may not be applied
-- Check the proxy plugin is enabled in Settings → Plugins
-- Clear browser cache and reload
+- `dsh-cron` (@goodandready) — Host-side doesn't start, no logs generated
 
 ## OpenCode Go Session Header
 
@@ -275,6 +280,39 @@ llm-pi-ai:
 ```
 
 **Status:** PR proposed at [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) adding `sessionHeader` config field for dynamic per-session IDs.
+
+## Troubleshooting
+
+### DSH won't start
+- Check logs: `journalctl -u dsh -f`
+- Verify Node.js is in PATH: `which node`
+- Check DSH home exists: `ls ~/.dsh/`
+- Verify credentials: `cat ~/.dsh/.credentials.yaml`
+
+### Proxy not accessible
+- Check if the plugin loaded: Settings → Plugins → dsh-proxy
+- Check port is open: `ss -tlnp | grep 3080`
+- Check firewall: `sudo ufw allow 3080/tcp`
+- For remote access, add `--trusted-host yourdomain.com` to run.sh
+
+### WebSocket not working
+- The proxy must forward `Upgrade` and `Connection` headers
+- If behind another proxy (nginx/Caddy), ensure WebSocket is enabled there too
+
+### Settings page shows "unavailable in this browser"
+- The loopback patch may not be applied
+- Check the proxy plugin is enabled in Settings → Plugins
+- Clear browser cache and reload
+
+### Plugin not loading
+- Check the plugin is in `bundles` array in `package.json`
+- Check `cordis.patch.yml` syntax
+- Check logs for errors: `journalctl -u dsh -f | grep -i error`
+
+### Credentials not found
+- Verify `~/.dsh/.credentials.yaml` exists and has correct format
+- Check file permissions: `ls -la ~/.dsh/.credentials.yaml`
+- Ensure the credential name matches what the plugin expects
 
 ## Files
 
