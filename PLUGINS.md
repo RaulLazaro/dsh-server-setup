@@ -20,7 +20,6 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 | Plugin | Description |
 |--------|-------------|
 | `dsh-omni-router` | Multi-workspace routing and navigation |
-| `dsh-upload-button` | Adds file upload button to the composer (images via paste/drag) |
 | `@deepseek-ai/dsh-client-ui-attachment` | Attachment UI components |
 
 ## Memory & Context
@@ -43,7 +42,6 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 | Plugin | Description |
 |--------|-------------|
 | `dsh-task-worktree` | Git worktree isolation for tasks — keeps main clean |
-| `dsh-file-viewer` | View files with syntax highlighting in the conversation |
 | `dsh-mcp-sync` | MCP server synchronization across sessions |
 
 ## Search & Browser
@@ -65,14 +63,6 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 |--------|-------------|
 | `dsh-pwa-plugin` | **Mine** — Service worker + manifest for offline support and install-as-app |
 
-## Scheduling & Notifications
-
-| Plugin | Description |
-|--------|-------------|
-| `dsh-cron` | Cron scheduler with cold wake — runs tasks even without a browser open |
-| `dsh-webhook` | Inbound/outbound webhook endpoints for external integrations |
-| `dsh-telegram-bridge` | Telegram bot bridge — notifications, cron alerts, and remote control |
-
 ## Agents & Subagents
 
 | Plugin | Description |
@@ -85,6 +75,17 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 |--------|-------------|
 | `dshmarket` | In-app plugin marketplace — browse, search, one-click install from 2900+ community plugins |
 | `dsh-config-manager` | Backup/restore/migrate DSH config with encryption support |
+
+## Not Working with DSH 0.1.5
+
+| Plugin | Reason |
+|--------|--------|
+| `dsh-cron` (@goodandready) | Host-side doesn't start — no logs generated |
+| `dsh-telegram` (v0.2.0) | Host-side `apply()` never executes |
+| `dsh-telegram-bridge` | Depends on `apiProxy` which doesn't exist in DSH 0.1.5 |
+| `dsh-upload-button` | Now built-in in DSH 0.1.5 |
+| `dsh-file-viewer` | Now built-in in DSH 0.1.5 sidebar |
+| `dsh-webhook` | Removed — cron notifications use dsh-telegram-bridge |
 
 ## My Custom Plugins
 
@@ -108,8 +109,24 @@ PWA support for DSH. Adds offline caching and install-as-app capability.
 
 ## Stats
 
-- **Total plugins:** 23 (including core)
+- **Total plugins:** 21 (including core)
 - **Custom plugins:** 2 (dsh-preview-plugin, dsh-pwa-plugin)
 - **Server:** Oracle Cloud ARM64, Ubuntu 24.04
 - **Node.js:** v24 (via fnm)
 - **Access:** dsh-proxy plugin on port 3080
+- **DSH Version:** 0.1.5-rc.1
+
+## OpenCode Go Session Header
+
+OpenCode Go requires an `x-opencode-session` header for per-conversation routing. DSH doesn't send this natively.
+
+**Workaround:** Static header in `settings.yaml`:
+```yaml
+llm-pi-ai:
+  providers:
+    opencode-go:
+      headers:
+        x-opencode-session: "dsh-global"
+```
+
+**Status:** PR proposed at [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) adding `sessionHeader` config field for dynamic per-session IDs.

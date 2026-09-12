@@ -13,5 +13,6 @@ DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 
 mkdir -p "$DSH_HOME"
 
+# --trusted-host: allow remote access via the domain name
 echo "[dsh] Starting DSH on port ${DSH_PORT}..."
-exec dsh web --port "$DSH_PORT" --no-open
+exec dsh web --port "$DSH_PORT" --no-open --trusted-host dsh.raullazaro.com
