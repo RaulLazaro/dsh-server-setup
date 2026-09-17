@@ -267,11 +267,32 @@ The proxy forwards WebSocket connections for real-time DSH features (streaming, 
 
 ## OpenCode Go Session Header
 
-OpenCode Go requires an `x-opencode-session` header for per-conversation routing. DSH doesn't send this natively.
+OpenCode Go requires an `x-opencode-session` header on every request for per-conversation
+routing and prompt-cache affinity. A request without it is answered with
+`400 MissingSessionID`. DSH's built-in pi-ai route does not send it — see the open upstream
+discussion [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495).
 
-**Workaround** (in `~/.dsh/settings.yaml`):
+The fix is the provider plugin
+[scavanger2221/dsh-llm-opencode-go](https://github.com/scavanger2221/dsh-llm-opencode-go), which
+owns the `opencode-go` route and stamps the harness session id on every request — one id per
+conversation, under both `x-opencode-session` and the `x-deepseek-harness-session-id` OpenCode
+also recognizes:
+
+```bash
+dsh plugin --profile web add github:scavanger2221/dsh-llm-opencode-go#v0.1.2
+```
+
+Use **v0.1.2 or later**: it declares `@earendil-works/pi-ai` as a peer dependency, which the
+harness already provides. v0.1.0 depended on it and pulled pi-ai's whole transitive closure,
+which can abort the install on a fresh `$DSH_HOME`.
+
+The package registers its own row through its bundle patch, so listing it in
+`dsh.profile.bundles` is all that is required. Do **not** also declare the row by hand in the
+profile's `cordis.patch.yml`, and do **not** keep the old static workaround in
+`~/.dsh/settings.yaml`:
 
 ```yaml
+# Don't: it competes with the plugin for the same route.
 llm-pi-ai:
   providers:
     opencode-go:
@@ -279,7 +300,30 @@ llm-pi-ai:
         x-opencode-session: "dsh-global"
 ```
 
-**Status:** PR proposed at [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) adding `sessionHeader` config field for dynamic per-session IDs.
+`llm.registerAdapter` is all-or-nothing and refuses a duplicate route with `DUPLICATE_ADAPTER`,
+so only one of the two can serve `opencode-go` and the winner depends on load order. Verify the
+plugin is the owner — there must be exactly one row:
+
+```bash
+dsh --profile web --dump-config | grep -A5 '^- id: llm-opencode-go'
+```
+
+### Why the value matters
+
+The header value is the prompt-cache partition key, measured against the Go endpoint:
+
+| Request | Cache |
+|---------|-------|
+| same value as the previous request | `cached_tokens > 0` (hit) |
+| a different value | `cached_tokens: 0` (miss) |
+| no header | `400 MissingSessionID` |
+
+A static value such as `dsh-global` is accepted and does hit the cache inside a conversation, but
+it puts every conversation in a single cache partition and defeats Go's per-session routing. The
+plugin's per-session id is what OpenCode asks for.
+
+**Upstream status:** discussion [#5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495)
+is still open; the plugin is the working setup in the meantime.
 
 ## Troubleshooting
 
