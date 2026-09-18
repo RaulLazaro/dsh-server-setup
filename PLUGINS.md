@@ -9,6 +9,12 @@ My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 A
 | `@deepseek-ai/dsh-base` | DSH core bundle (bundled) |
 | `@deepseek-ai/dsh-web-app` | DSH web UI shell (bundled) |
 
+## Models & Providers
+
+| Plugin | Description |
+|--------|-------------|
+| `dsh-llm-opencode-go` | OpenCode Go provider — owns the `opencode-go` route and sends the per-conversation `x-opencode-session` header (cache affinity), plus a live model catalog and a Settings → Plugins card. See [README § OpenCode Go](README.md#opencode-go-session-header) |
+
 ## Network & Access
 
 | Plugin | Description |
@@ -109,7 +115,7 @@ PWA support for DSH. Adds offline caching and install-as-app capability.
 
 ## Stats
 
-- **Total plugins:** 21 (including core)
+- **Total plugins:** 20 (including core)
 - **Custom plugins:** 2 (dsh-preview-plugin, dsh-pwa-plugin)
 - **Server:** Oracle Cloud ARM64, Ubuntu 24.04
 - **Node.js:** v24 (via fnm)
@@ -118,15 +124,9 @@ PWA support for DSH. Adds offline caching and install-as-app capability.
 
 ## OpenCode Go Session Header
 
-OpenCode Go requires an `x-opencode-session` header for per-conversation routing. DSH doesn't send this natively.
-
-**Workaround:** Static header in `settings.yaml`:
-```yaml
-llm-pi-ai:
-  providers:
-    opencode-go:
-      headers:
-        x-opencode-session: "dsh-global"
-```
-
-**Status:** PR proposed at [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) adding `sessionHeader` config field for dynamic per-session IDs.
+OpenCode Go rejects requests without `x-opencode-session` (`400 MissingSessionID`). The
+`dsh-llm-opencode-go` plugin owns the `opencode-go` route and sends the harness session id on
+every request, so **no** `llm-pi-ai` provider entry is needed in `settings.yaml` — and a static
+one must not be added, because two adapters cannot share one route and the loser fails with
+`DUPLICATE_ADAPTER`. Install and verification steps:
+[README § OpenCode Go Session Header](README.md#opencode-go-session-header).
