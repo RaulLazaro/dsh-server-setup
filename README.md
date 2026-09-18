@@ -43,53 +43,35 @@ fnm install 24
 # pnpm
 npm install -g pnpm
 
-# DSH
-npm install -g @deepseek-ai/dsh@0.1.5-rc.1
+# DSH (0.1.5-rc.2 at the time of writing; pin an exact version if you prefer)
+npm install -g @deepseek-ai/dsh@latest
 ```
 
-### 2. Create a web profile
+### 2. Create the web profile and add plugins
 
-```bash
-mkdir -p ~/.dsh/profiles/web
-cd ~/.dsh/profiles/web
-```
-
-### 3. Add plugins
+`dsh plugin` forwards to pnpm inside the profile and keeps `dsh.profile.bundles` in sync: a
+package that declares `dsh.bundle` — every plugin below does — is appended to the layer stack
+automatically, so the bundles array is never edited by hand. The first call also creates
+`~/.dsh/profiles/web/` from the shipped `web` template: `package.json`, `cordis.patch.yml`,
+`pnpm-workspace.yaml`, and the `cordis.yml` loader root (which DSH rewrites on every boot —
+never edit it):
 
 ```bash
 # Reverse proxy
-pnpm add github:smanx/dsh-proxy
+dsh plugin --profile web add github:smanx/dsh-proxy
 
 # Other recommended plugins
-pnpm add dshmarket dsh-mnemon dsh-free-search dsh-config-manager dsh-mcp-sync
+dsh plugin --profile web add dshmarket dsh-mnemon dsh-free-search dsh-config-manager dsh-mcp-sync
 ```
 
-### 4. Configure the profile
+A package that declares no `dsh.bundle` (client-only plugins, plain libraries) still installs as
+a dependency, and DSH warns that it is not a profile layer.
 
-**`~/.dsh/profiles/web/package.json`:**
+### 3. Configure the profile
 
-```json
-{
-  "name": "dsh-profile-web",
-  "private": true,
-  "dependencies": {
-    "@smanx/dsh-proxy": "github:smanx/dsh-proxy",
-    "dshmarket": "^1.45.1"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app",
-        "@smanx/dsh-proxy",
-        "dshmarket"
-      ]
-    }
-  }
-}
-```
-
-**`~/.dsh/profiles/web/cordis.patch.yml`:**
+Each package's bundle patch already mounts its own row, so
+`~/.dsh/profiles/web/cordis.patch.yml` only carries overrides. A row is addressed by its `id` and
+the patch replaces that row's whole config, so restate every key you own:
 
 ```yaml
 # dsh-proxy: reverse proxy for LAN/remote access
@@ -101,7 +83,13 @@ pnpm add dshmarket dsh-mnemon dsh-free-search dsh-config-manager dsh-mcp-sync
     # password: changeme    # Uncomment to enable Basic Auth
 ```
 
-### 5. Configure credentials
+Check what actually mounts — one composed row per plugin — with:
+
+```bash
+dsh --profile web --dump-config
+```
+
+### 4. Configure credentials
 
 Create `~/.dsh/.credentials.yaml`:
 
@@ -112,39 +100,49 @@ refs:
 records: {}
 ```
 
-### 6. Install the systemd service
+### 5. Install the systemd service
+
+Edit `User`, `Group`, `WorkingDirectory` and `ExecStart` in `systemd/dsh.service` first — the
+checked-in unit is a template with placeholders:
 
 ```bash
+$EDITOR systemd/dsh.service
 sudo cp systemd/dsh.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable dsh
-sudo systemctl start dsh
+sudo systemctl enable --now dsh
 ```
 
-### 7. Verify
+Per-instance settings (`DSH_PORT`, `DSH_HOME`, `DSH_TRUSTED_HOST`) belong in `.env` beside
+`run.sh` — copy `.env.example` and edit it; `run.sh` sources that file, and the unit's own
+`Environment=` lines win over it. `DSH_TRUSTED_HOST` is what lets the instance be opened by its
+public hostname without a token in the URL.
+
+### 6. Verify
 
 ```bash
-# Check DSH is running
+# Check DSH is running (loopback answers without a token)
 curl -s http://127.0.0.1:3079/ | head -5
 
-# Check proxy is accessible
+# Check the proxy is accessible (asks for Basic Auth if you enabled it)
 curl -s http://YOUR_SERVER_IP:3080/ | head -5
 
-# Check logs
+# Check the service and its logs
+systemctl status dsh
 journalctl -u dsh -f
 ```
 
 ## Updating DSH
 
-The `update_all.sh` script handles updates automatically via cron. To update manually:
-
 ```bash
-# Update DSH
 npm install -g @deepseek-ai/dsh@latest
-
-# Restart service
 sudo systemctl restart dsh
 ```
+
+`Restart=always` brings the service back on its own; confirm with `dsh --version` and
+`journalctl -u dsh -f`. An upgrade replaces the global package tree, so **re-apply any local
+patch you keep inside the installed `node_modules`** afterwards — npm does not preserve it.
+Restarting also stops any dev server a session launched as a child of DSH; start those with
+`setsid nohup CMD > log 2>&1 < /dev/null &` if they must outlive the service.
 
 ## Configuration
 
@@ -158,6 +156,9 @@ Go to **Settings → LAN Proxy** in the DSH web GUI to:
 - View connection status
 
 ### Proxy Settings (via cordis.patch.yml)
+
+The plugin's bundle patch mounts the row; this entry in the profile's `cordis.patch.yml`
+overrides its config. A row patch replaces the whole config, so restate every key you own:
 
 ```yaml
 - id: dsh-proxy
@@ -179,53 +180,39 @@ The proxy does **not** handle HTTPS. For production, put a TLS terminator in fro
 
 ### Pangolin Setup
 
-[Pangolin](https://github.com/fosrl/pangolin) is a self-hosted tunnel that gives you HTTPS + authentication + WireGuard VPN without opening ports. It runs as Docker containers on the same VPS.
+[Pangolin](https://github.com/fosrl/pangolin) is a self-hosted identity-aware tunnel that gives you
+HTTPS + authentication in front of DSH without exposing the port. It runs as Docker containers
+(`pangolin`, `gerbil`, `traefik`) on the same VPS; the installer is the supported path — the old
+`git clone … && bash install.sh` flow no longer exists.
 
-**1. Install Pangolin:**
+Prerequisites: a domain pointing at the server, and ports 80/TCP, 443/TCP, 51820/UDP and
+21820/UDP open.
 
-```bash
-git clone https://github.com/fosrl/pangolin.git ~/pangolin
-cd ~/pangolin
-bash install.sh
-```
-
-**2. Configure (`~/pangolin/config/config.yml`):**
-
-```yaml
-domain: yourdomain.com
-
-letsencrypt:
-  email: you@yourdomain.com
-  useLetsEncrypt: true
-
-flask_secret: <random-secret>  # Generate with: openssl rand -hex 32
-jwt_secret: <random-secret>    # Generate with: openssl rand -hex 32
-```
-
-**3. Add DSH resource in Pangolin dashboard:**
-
-1. Open `https://yourdomain.com` → login
-2. Go to **Resources** → **New Resource**
-3. Set:
-   - Name: `dsh`
-   - Protocol: `HTTP`
-   - Target IP: `127.0.0.1`
-   - Target Port: `3080`
-4. Create a **Target** (the Gerbil client) and generate a config
-5. On your VPS, add the Gerbil client:
+**1. Run the installer:**
 
 ```bash
-sudo nano /etc/pangolin/client/config.yml
-sudo systemctl restart pangolin-client
+mkdir -p ~/pangolin && cd ~/pangolin
+curl -fsSL https://static.pangolin.net/get-installer.sh | bash
+sudo ./installer
 ```
 
-**4. Access DSH:**
+It prompts for the edition (Community/Enterprise), the base domain, the dashboard domain
+(`pangolin.example.com` by default), a Let's Encrypt email, and whether to install Gerbil for
+tunnelled connections, then pulls and starts the containers (2-3 minutes).
 
-```
-https://dsh.yourdomain.com
-```
+**2. Create the first admin account** at the URL the installer prints,
+`https://<dashboard-domain>/auth/initial-setup`, using the setup token from
+`sudo docker compose logs pangolin`. Create an organisation when prompted.
 
-**Advantages over direct proxy:**
+**3. Publish DSH as a resource:** in the dashboard add a resource whose target is
+`http://127.0.0.1:3080` — the `dsh-proxy` port — and attach a target (Newt/Gerbil client) for
+this server. Exact field names and client installation live in the
+[Pangolin docs](https://docs.pangolin.net/) — treat them as the source of truth, the dashboard
+changes between releases.
+
+**4. Access DSH** at the resource's public URL.
+
+**Advantages over exposing the proxy directly:**
 - HTTPS with automatic Let's Encrypt certificates
 - Built-in authentication (email-based or SSO)
 - WireGuard VPN option for full network access
@@ -246,7 +233,8 @@ DSH checks `location.hostname` to determine if the browser is local. Non-loopbac
 The proxy forwards WebSocket connections for real-time DSH features (streaming, live updates).
 
 ### Public path whitelist
-`/manifest.webmanifest`, `/favicon.svg`, and `/favicon.ico` are served without auth so browsers can fetch PWA metadata without credentials.
+`/manifest.webmanifest` and `/favicon.svg` are served without auth so browsers can fetch PWA
+metadata without credentials.
 
 ## DSH 0.1.5 Changes
 
@@ -337,7 +325,8 @@ is still open; the plugin is the working setup in the meantime.
 - Check if the plugin loaded: Settings → Plugins → dsh-proxy
 - Check port is open: `ss -tlnp | grep 3080`
 - Check firewall: `sudo ufw allow 3080/tcp`
-- For remote access, add `--trusted-host yourdomain.com` to run.sh
+- For remote access by hostname, set `DSH_TRUSTED_HOST` in `.env` (run.sh passes it as
+  `--trusted-host`)
 
 ### WebSocket not working
 - The proxy must forward `Upgrade` and `Connection` headers
@@ -349,7 +338,9 @@ is still open; the plugin is the working setup in the meantime.
 - Clear browser cache and reload
 
 ### Plugin not loading
-- Check the plugin is in `bundles` array in `package.json`
+- Check the composed tree: `dsh --profile web --dump-config` (one row per plugin)
+- Check the package is listed in `dsh.profile.bundles` in the profile's `package.json`;
+  `dsh plugin --profile web add <package>` maintains that list
 - Check `cordis.patch.yml` syntax
 - Check logs for errors: `journalctl -u dsh -f | grep -i error`
 
@@ -364,15 +355,19 @@ is still open; the plugin is the working setup in the meantime.
 dsh-server-setup/
 ├── README.md                    # This file
 ├── PLUGINS.md                   # Plugin stack list
-├── run.sh                       # DSH wrapper script
+├── run.sh                       # DSH wrapper script (sources .env if present)
+├── .env.example                 # DSH_PORT / DSH_HOME / DSH_TRUSTED_HOST
 ├── systemd/
-│   └── dsh.service              # Systemd unit file
-└── dsh-proxy/                   # Standalone proxy (alternative)
+│   └── dsh.service              # Systemd unit template (edit the placeholders)
+└── dsh-proxy/                   # Legacy standalone proxy, kept for reference
     └── node/
         ├── index.js
         ├── proxy-core.js
         └── package.json
 ```
+
+The supported reverse proxy is the `@smanx/dsh-proxy` plugin; the `dsh-proxy/node/` copy is the
+pre-plugin standalone process and is no longer wired into `run.sh`.
 
 ## Plugins
 

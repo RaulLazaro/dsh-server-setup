@@ -5,14 +5,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/dsh-server-setup
-ExecStart=/home/ubuntu/dsh-server-setup/run.sh
+# Edit these four placeholders before installing the unit.
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/path/to/dsh-server-setup
+ExecStart=/path/to/dsh-server-setup/run.sh
 Restart=always
 RestartSec=5
-Environment=DSH_HOME=/home/ubuntu/.dsh
+# The reverse proxy is a DSH plugin, so there is nothing else to supervise here.
+# Per-instance defaults can also live in /path/to/dsh-server-setup/.env, which
+# run.sh sources; these Environment= lines win over it.
+Environment=DSH_HOME=/home/YOUR_USER/.dsh
 Environment=DSH_PORT=3079
+# Environment=DSH_TRUSTED_HOST=dsh.example.com
 
 [Install]
 WantedBy=multi-user.target
