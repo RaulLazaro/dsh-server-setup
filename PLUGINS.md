@@ -2,6 +2,8 @@
 
 My DSH web profile plugin stack. All plugins run on a remote VPS (Ubuntu 24.04 ARM64) with the reverse proxy setup described in the [README](README.md).
 
+Installed with `dsh plugin --profile web add <package>`, which keeps `dsh.profile.bundles` in sync; this list mirrors that array plus the two in-box bundles.
+
 ## Core
 
 | Plugin | Description |
