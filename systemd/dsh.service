@@ -10,6 +10,10 @@ User=YOUR_USER
 Group=YOUR_USER
 WorkingDirectory=/path/to/dsh-server-setup
 ExecStart=/path/to/dsh-server-setup/run.sh
+# Re-applies the local node_modules workarounds on every boot (npm rewrites the
+# global tree on each install, so this cannot be a one-time manual step).
+# See README "Local patches (ExecStartPre)".
+ExecStartPre=/path/to/dsh-server-setup/scripts/patch-dsh-connection.sh
 Restart=always
 RestartSec=5
 # The reverse proxy is a DSH plugin, so there is nothing else to supervise here.
