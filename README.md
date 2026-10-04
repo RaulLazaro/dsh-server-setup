@@ -43,8 +43,12 @@ fnm install 24
 # pnpm
 npm install -g pnpm
 
-# DSH (0.1.5-rc.2 at the time of writing; pin an exact version if you prefer)
-npm install -g @deepseek-ai/dsh@latest
+# DSH — pin the exact version your plugin stack is verified against.
+# `@latest` moves fast (0.2.0-rc.2 at the time of writing), and DSH enforces
+# plugin peer ranges at boot: a plugin pinned to an older runtime is *skipped*
+# (whole bundle) or *disabled* (its config rows) instead of loading, which is
+# how a blind upgrade silently loses the proxy or the agent presets.
+npm install -g @deepseek-ai/dsh@0.1.7-rc.2
 ```
 
 ### 2. Create the web profile and add plugins
@@ -131,18 +135,74 @@ systemctl status dsh
 journalctl -u dsh -f
 ```
 
+### Local patches (ExecStartPre)
+
+Two upstream issues bite this stack; both are fixed by a small idempotent script that
+[scripts/patch-dsh-connection.sh](scripts/patch-dsh-connection.sh) applies to the installed
+`@deepseek-ai/dsh-client-connection` **before every boot** (npm rewrites the global tree on
+each install, so the patch must run from `ExecStartPre`, not once by hand):
+
+1. **`cannot get property "webServer" without inject`** — a plugin calling
+   `connection.rpc.handle()` (notably `@smanx/dsh-proxy` before
+   [upstream commit `cda3f24`](https://github.com/smanx/dsh-proxy/commit/cda3f24fb44383aa48d65f56989bb3f5f3f532b9),
+   2026-09-29) crashes while mounting, so port 3080 never binds. Adding `"webServer"` to the
+   declared `inject` list fixes it. Updating `@smanx/dsh-proxy` to that commit or newer fixes
+   it upstream — the patch stays as a safety net for older pinned commits.
+2. **`SameSite=Strict` session cookie** — the cookie is emitted `Strict`, which Android
+   ignores when an *installed PWA* is launched (its first request is `Sec-Fetch-Site:
+   cross-site`), so the PWA loops on 401 while the normal browser tab works. `Lax` still
+   blocks cross-site `fetch`/`XHR`, where `Strict` actually mattered.
+
+Wire it up:
+
+```ini
+# /etc/systemd/system/dsh.service
+ExecStart=/path/to/dsh-server-setup/run.sh
+ExecStartPre=/path/to/dsh-server-setup/scripts/patch-dsh-connection.sh
+```
+
+Both patches are idempotent and exit 0 without touching anything when the pattern no longer
+matches (i.e. once upstream ships the fix), so keeping the hook costs nothing.
+
 ## Updating DSH
 
 ```bash
-npm install -g @deepseek-ai/dsh@latest
+npm install -g @deepseek-ai/dsh@<new-version>
 sudo systemctl restart dsh
 ```
 
+Bump the pin deliberately, and if an updater script or cron re-installs a pinned version for
+you, change that pin **in the same change** — otherwise the next run silently reverts the
+upgrade while the profile already targets the new runtime.
+
 `Restart=always` brings the service back on its own; confirm with `dsh --version` and
 `journalctl -u dsh -f`. An upgrade replaces the global package tree, so **re-apply any local
-patch you keep inside the installed `node_modules`** afterwards — npm does not preserve it.
+patch you keep inside the installed `node_modules`** afterwards — npm does not preserve it
+(this is why [scripts/patch-dsh-connection.sh](scripts/patch-dsh-connection.sh) is wired as
+`ExecStartPre`, see [Local patches](#local-patches-execstartpre)).
 Restarting also stops any dev server a session launched as a child of DSH; start those with
 `setsid nohup CMD > log 2>&1 < /dev/null &` if they must outlive the service.
+
+### Verify the plugin stack after an upgrade
+
+DSH checks every plugin's `peerDependencies` against the runtime at boot. After restarting,
+read the first journal lines for:
+
+- `skipping profile bundle "<name>"` — a whole plugin was dropped (e.g. a worktree or proxy
+  bundle whose peers still pin the previous minor).
+- `disabling profile plugin row "<name>"` — the package loaded but its config rows were
+  refused (typical for preset packages pinned to an exact registry version).
+
+Either update the plugin, wait for a compatible release, or — only if you accept the crash
+risk — grant an explicit single-package exemption:
+
+```bash
+dsh plugin --profile web allow-version <package>@<version>
+```
+
+Also re-check the proxy is listening (`ss -tlnp | grep 3080`) and that a login still
+completes end to end. If you keep sessions you care about, snapshot `~/.dsh/sessions` before
+upgrading: config backups do not include it by default.
 
 ## Configuration
 
@@ -206,9 +266,12 @@ tunnelled connections, then pulls and starts the containers (2-3 minutes).
 
 **3. Publish DSH as a resource:** in the dashboard add a resource whose target is
 `http://127.0.0.1:3080` — the `dsh-proxy` port — and attach a target (Newt/Gerbil client) for
-this server. Exact field names and client installation live in the
-[Pangolin docs](https://docs.pangolin.net/) — treat them as the source of truth, the dashboard
-changes between releases.
+this server. If Traefik runs in Docker (as it does with the bundled compose file), the
+resource target is resolved *inside the container*, where `127.0.0.1` is the container itself:
+use the host's Docker bridge address instead (e.g. `http://172.18.0.1:3080`, check with
+`ip -4 addr show docker0` or your compose network). Exact field names and client installation
+live in the [Pangolin docs](https://docs.pangolin.net/) — treat them as the source of truth,
+the dashboard changes between releases.
 
 **4. Access DSH** at the resource's public URL.
 
@@ -260,21 +323,34 @@ routing and prompt-cache affinity. A request without it is answered with
 `400 MissingSessionID`. DSH's built-in pi-ai route does not send it — see the open upstream
 discussion [DSH #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495).
 
-The fix is the provider plugin
-[scavanger2221/dsh-llm-opencode-go](https://github.com/scavanger2221/dsh-llm-opencode-go), which
-owns the `opencode-go` route and stamps the harness session id on every request — one id per
-conversation, under both `x-opencode-session` and the `x-deepseek-harness-session-id` OpenCode
-also recognizes:
+The fix is a provider plugin that owns the `opencode-go` route and stamps the harness session
+id on every request — one id per conversation, under both `x-opencode-session` and the
+`x-deepseek-harness-session-id` OpenCode also recognizes. Two work:
 
 ```bash
+# Current pick (npm, ships a Settings card + live model catalog):
+dsh plugin --profile web add dsh-opencode-go
+
+# Alternative (GitHub, route owner before the npm package existed):
 dsh plugin --profile web add github:scavanger2221/dsh-llm-opencode-go#v0.1.2
 ```
 
-Use **v0.1.2 or later**: it declares `@earendil-works/pi-ai` as a peer dependency, which the
-harness already provides. v0.1.0 depended on it and pulled pi-ai's whole transitive closure,
-which can abort the install on a fresh `$DSH_HOME`.
+Install **one route owner, not both**: `llm.registerAdapter` is all-or-nothing and refuses a
+duplicate route with `DUPLICATE_ADAPTER`, and the winner depends on load order. Keeping the
+loser installed as a safety net is fine as long as its row is disabled explicitly in the
+profile's `cordis.patch.yml` (that is what this server does with `dsh-llm-opencode-go`).
+Verify exactly one row serves the route:
 
-The package registers its own row through its bundle patch, so listing it in
+```bash
+dsh --profile web --dump-config | grep -B2 -A5 'opencode'
+# llm-opencode-go row must carry `disabled: true` if the other owner is active
+```
+
+For the GitHub alternative, use **v0.1.2 or later**: it declares `@earendil-works/pi-ai` as a
+peer dependency, which the harness already provides. v0.1.0 depended on it and pulled pi-ai's
+whole transitive closure, which can abort the install on a fresh `$DSH_HOME`.
+
+Either package registers its own row through its bundle patch, so listing it in
 `dsh.profile.bundles` is all that is required. Do **not** also declare the row by hand in the
 profile's `cordis.patch.yml`, and do **not** keep the old static workaround in
 `~/.dsh/settings.yaml`:
@@ -286,14 +362,6 @@ llm-pi-ai:
     opencode-go:
       headers:
         x-opencode-session: "dsh-global"
-```
-
-`llm.registerAdapter` is all-or-nothing and refuses a duplicate route with `DUPLICATE_ADAPTER`,
-so only one of the two can serve `opencode-go` and the winner depends on load order. Verify the
-plugin is the owner — there must be exactly one row:
-
-```bash
-dsh --profile web --dump-config | grep -A5 '^- id: llm-opencode-go'
 ```
 
 ### Why the value matters
@@ -324,6 +392,10 @@ is still open; the plugin is the working setup in the meantime.
 ### Proxy not accessible
 - Check if the plugin loaded: Settings → Plugins → dsh-proxy
 - Check port is open: `ss -tlnp | grep 3080`
+- Check the journal for `cannot get property "webServer" without inject` — the
+  `dsh-proxy` RPC channel failed to mount; see
+  [Local patches](#local-patches-execstartpre) or update `@smanx/dsh-proxy` to a
+  commit newer than `cda3f24`
 - Check firewall: `sudo ufw allow 3080/tcp`
 - For remote access by hostname, set `DSH_TRUSTED_HOST` in `.env` (run.sh passes it as
   `--trusted-host`)
@@ -341,8 +413,16 @@ is still open; the plugin is the working setup in the meantime.
 - Check the composed tree: `dsh --profile web --dump-config` (one row per plugin)
 - Check the package is listed in `dsh.profile.bundles` in the profile's `package.json`;
   `dsh plugin --profile web add <package>` maintains that list
+- After an upgrade, grep the journal for `skipping profile bundle` / `disabling profile
+  plugin row` — DSH refuses plugins whose peer ranges exclude the running runtime (see
+  [Updating DSH](#updating-dsh))
 - Check `cordis.patch.yml` syntax
 - Check logs for errors: `journalctl -u dsh -f | grep -i error`
+
+### Installed PWA loops asking for the token
+- The session cookie is emitted `SameSite=Strict` and Android drops it on the PWA's
+  cross-site launch request, while the same URL works in a normal browser tab — see
+  [Local patches](#local-patches-execstartpre)
 
 ### Credentials not found
 - Verify `~/.dsh/.credentials.yaml` exists and has correct format
@@ -357,6 +437,8 @@ dsh-server-setup/
 ├── PLUGINS.md                   # Plugin stack list
 ├── run.sh                       # DSH wrapper script (sources .env if present)
 ├── .env.example                 # DSH_PORT / DSH_HOME / DSH_TRUSTED_HOST
+├── scripts/
+│   └── patch-dsh-connection.sh  # Idempotent node_modules patches, run via ExecStartPre
 ├── systemd/
 │   └── dsh.service              # Systemd unit template (edit the placeholders)
 └── dsh-proxy/                   # Legacy standalone proxy, kept for reference

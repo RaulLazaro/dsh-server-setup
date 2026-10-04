@@ -15,7 +15,9 @@ Installed with `dsh plugin --profile web add <package>`, which keeps `dsh.profil
 
 | Plugin | Description |
 |--------|-------------|
-| `dsh-llm-opencode-go` | OpenCode Go provider — owns the `opencode-go` route and sends the per-conversation `x-opencode-session` header (cache affinity), plus a live model catalog and a Settings → Plugins card. See [README § OpenCode Go](README.md#opencode-go-session-header) |
+| `dsh-opencode-go` | OpenCode Go provider — owns the `opencode-go` route and sends the per-conversation `x-opencode-session` header (cache affinity), plus a live model catalog and a Settings card. See [README § OpenCode Go](README.md#opencode-go-session-header) |
+| `dsh-llm-opencode-go` | Earlier owner of the same route — kept installed as a safety net but **disabled** in `cordis.patch.yml`; only one of the two may serve the route (`DUPLICATE_ADAPTER` otherwise) |
+| `dsh-jev-plugin` | **Mine** — Ask Jev typed questions (batch judgements with probabilities) from the harness, configured per user in Settings |
 
 ## Network & Access
 
@@ -43,7 +45,6 @@ Installed with `dsh plugin --profile web add <package>`, which keeps `dsh.profil
 |--------|-------------|
 | `dsh-skill-hub` | Skill management UI — browse, enable/disable, create, sync from market |
 | `dsh-skill-manager` | Local skill file management |
-| `dsh-run2skill` | Convert agent conversations into reusable skills |
 
 ## Development
 
@@ -94,6 +95,7 @@ Installed with `dsh plugin --profile web add <package>`, which keeps `dsh.profil
 | `dsh-upload-button` | Now built-in in DSH 0.1.5 |
 | `dsh-file-viewer` | Now built-in in DSH 0.1.5 sidebar |
 | `dsh-webhook` | Removed — cron notifications use dsh-telegram-bridge |
+| `dsh-run2skill` | Removed from the profile (2026-10): its settings registration fails with `TypeError: settings.register is not a function` |
 
 ## My Custom Plugins
 
@@ -117,17 +119,17 @@ PWA support for DSH. Adds offline caching and install-as-app capability.
 
 ## Stats
 
-- **Total plugins:** 20 (including core)
-- **Custom plugins:** 2 (dsh-preview-plugin, dsh-pwa-plugin)
+- **Total plugins:** 21 (including core)
+- **Custom plugins:** 3 (dsh-preview-plugin, dsh-pwa-plugin, dsh-jev-plugin)
 - **Server:** Oracle Cloud ARM64, Ubuntu 24.04
 - **Node.js:** v24 (via fnm)
 - **Access:** dsh-proxy plugin on port 3080
-- **DSH Version:** 0.1.5-rc.1
+- **DSH Version:** 0.1.7-rc.2 (pinned — see [README § Updating DSH](README.md#updating-dsh))
 
 ## OpenCode Go Session Header
 
 OpenCode Go rejects requests without `x-opencode-session` (`400 MissingSessionID`). The
-`dsh-llm-opencode-go` plugin owns the `opencode-go` route and sends the harness session id on
+`dsh-opencode-go` plugin owns the `opencode-go` route and sends the harness session id on
 every request, so **no** `llm-pi-ai` provider entry is needed in `settings.yaml` — and a static
 one must not be added, because two adapters cannot share one route and the loser fails with
 `DUPLICATE_ADAPTER`. Install and verification steps:
