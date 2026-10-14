@@ -12,6 +12,7 @@ This is a production-tested setup for running DSH on an Ubuntu server (ARM64 or 
 - **File upload & preview** — built-in in DSH 0.1.5+ (no plugin needed)
 - **PWA support** — install-as-app via custom plugin
 - **Trusted host** — remote access via domain name without token in URL
+- **Disk hygiene** — a systemd timer caps Docker build cache, logs and `btmp` ([DISK-HYGIENE.md](DISK-HYGIENE.md))
 
 ## Architecture
 
@@ -438,9 +439,17 @@ dsh-server-setup/
 ├── run.sh                       # DSH wrapper script (sources .env if present)
 ├── .env.example                 # DSH_PORT / DSH_HOME / DSH_TRUSTED_HOST
 ├── scripts/
-│   └── patch-dsh-connection.sh  # Idempotent node_modules patches, run via ExecStartPre
+│   ├── patch-dsh-connection.sh  # Idempotent node_modules patches, run via ExecStartPre
+│   ├── dsh-disk-report          # Read-only disk usage report
+│   ├── dsh-disk-guard           # Daily disk containment (systemd timer)
+│   └── install-disk-hygiene.sh  # Installs the disk hygiene tooling (idempotent)
+├── DISK-HYGIENE.md              # Why the disk fills up, and the rules that stop it
 ├── systemd/
-│   └── dsh.service              # Systemd unit template (edit the placeholders)
+│   ├── dsh.service              # Systemd unit template (edit the placeholders)
+│   ├── dsh-disk-guard.service   # Disk guard unit (thresholds)
+│   ├── dsh-disk-guard.timer     # Daily + on-boot schedule
+│   └── logrotate/
+│       └── dsh-disk-hygiene     # Rotates /var/log/btmp and the guard log
 └── dsh-proxy/                   # Legacy standalone proxy, kept for reference
     └── node/
         ├── index.js
@@ -450,6 +459,26 @@ dsh-server-setup/
 
 The supported reverse proxy is the `@smanx/dsh-proxy` plugin; the `dsh-proxy/node/` copy is the
 pre-plugin standalone process and is no longer wired into `run.sh`.
+
+## Disk hygiene
+
+The Docker build cache silently grows to tens of GB: on 2026-10-14 it was
+40.9 GB of a 96 GB disk, and `/var/lib/docker` alone was 44 GB — over half of
+all used space. A one-off cleanup reclaimed 18 GB; the rules that keep it from
+coming back are installed by:
+
+```bash
+sudo ./scripts/install-disk-hygiene.sh
+```
+
+That installs `~/.local/bin/dsh-disk-guard` plus a daily systemd timer
+(06:30 UTC and 5 min after boot) that drops build cache older than 72 h, prunes
+dangling images, caps `/var/log/btmp`, and writes an alert report to
+`~/.local/state/dsh/disk-guard.log` past 80% usage. Check the current state at
+any time with `~/.local/bin/dsh-disk-report`.
+
+The reasoning, the measured numbers and the standing rules are in
+[DISK-HYGIENE.md](DISK-HYGIENE.md).
 
 ## Plugins
 

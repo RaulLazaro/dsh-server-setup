@@ -1,0 +1,26 @@
+# Disk hygiene rotation rules (installed by scripts/install-disk-hygiene.sh)
+#
+# /var/log/btmp records every failed login attempt. On an internet-facing host
+# this file grows without bound: measured at 395 MB after ~1M failed SSH logins,
+# while its content is only useful for a few days of `lastb`.
+/var/log/btmp {
+    monthly
+    rotate 2
+    maxsize 10M
+    missingok
+    notifempty
+    create 0660 root utmp
+    compress
+    delaycompress
+}
+
+# Guard log: keep it small and bounded.
+/home/YOUR_USER/.local/state/dsh/*.log {
+    weekly
+    rotate 4
+    maxsize 5M
+    missingok
+    notifempty
+    compress
+    copytruncate
+}

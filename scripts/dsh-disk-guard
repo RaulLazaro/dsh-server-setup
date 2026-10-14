@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# dsh-disk-guard — vigila el disco y contiene los residuos que más crecen.
+# Política (configurable por entorno):
+#   DSH_DISK_WARN_PCT    umbral de aviso             (def. 80)
+#   DSH_DISK_PRUNE_PCT   umbral de poda automática   (def. 85)
+#   DSH_DISK_AUTOPRUNE   on|off  poda al superar el umbral (def. off)
+#   DSH_BUILD_CACHE_MAX_H horas de antigüedad máxima de la caché de build (def. 0 = no toca)
+set -uo pipefail
+
+STATE_DIR="$HOME/.local/state/dsh"
+LOG="$STATE_DIR/disk-guard.log"
+REPORT="$HOME/.local/bin/dsh-disk-report"
+WARN_PCT="${DSH_DISK_WARN_PCT:-80}"
+PRUNE_PCT="${DSH_DISK_PRUNE_PCT:-85}"
+AUTOPRUNE="${DSH_DISK_AUTOPRUNE:-off}"
+BUILD_CACHE_MAX_H="${DSH_BUILD_CACHE_MAX_H:-0}"
+
+mkdir -p "$STATE_DIR"
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
+
+# rota el log si pasa de 512K
+if [[ -f "$LOG" ]] && (( $(stat -c%s "$LOG") > 524288 )); then
+  tail -n 2000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+
+read -r PCT AVAIL < <(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5, $4}')
+AVAIL_H=$(numfmt --to=iec --suffix=B $((AVAIL*1024)) 2>/dev/null || echo "${AVAIL}K")
+log "disco /: ${PCT}% usado, ${AVAIL_H} libres"
+
+# 1) caché de build de Docker (el consumidor silencioso número uno)
+if (( BUILD_CACHE_MAX_H > 0 )) && command -v docker >/dev/null 2>&1; then
+  log "  poda caché de build > ${BUILD_CACHE_MAX_H}h"
+  docker builder prune -f --filter "until=${BUILD_CACHE_MAX_H}h" >>"$LOG" 2>&1
+fi
+
+# 2) capas/imágenes colgantes (nunca toca imágenes ni volúmenes en uso)
+if (( PCT >= PRUNE_PCT )) && command -v docker >/dev/null 2>&1; then
+  log "  umbral ${PRUNE_PCT}% alcanzado: poda de imágenes colgantes"
+  docker image prune -f >>"$LOG" 2>&1
+  if [[ "$AUTOPRUNE" == "on" ]]; then
+    log "  AUTOPRUNE on: poda completa de caché de build"
+    docker builder prune -af >>"$LOG" 2>&1
+  fi
+fi
+
+# 3) residuos regenerables baratos
+if (( PCT >= PRUNE_PCT )); then
+  command -v pnpm >/dev/null 2>&1 && pnpm store prune >>"$LOG" 2>&1
+  command -v npm  >/dev/null 2>&1 && npm cache clean --force >>"$LOG" 2>&1
+  sudo -n apt-get clean >>"$LOG" 2>&1
+  find /tmp -maxdepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null
+fi
+
+# 4) /var/log/btmp: crece con cada intento de login fallido
+if [[ -f /var/log/btmp ]] && (( $(sudo -n stat -c%s /var/log/btmp 2>/dev/null || echo 0) > 52428800 )); then
+  log "  btmp > 50M: se trunca"
+  sudo -n truncate -s 0 /var/log/btmp
+fi
+
+# 5) aviso si sigue alto
+if (( PCT >= WARN_PCT )); then
+  log "  AVISO: ${PCT}% >= ${WARN_PCT}%"
+  "$REPORT" --quiet 2>/dev/null | sed "s/^/  /" >>"$LOG"
+fi
+
+read -r PCT2 AVAIL2 < <(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5, $4}')
+(( PCT2 != PCT )) && log "resultado: ${PCT}% -> ${PCT2}%"
+exit 0

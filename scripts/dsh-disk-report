@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# dsh-disk-report — informe de uso de disco del host.
+# Uso: dsh-disk-report [--quiet]   (--quiet: solo imprime si supera umbral)
+set -uo pipefail
+WARN_PCT="${DSH_DISK_WARN_PCT:-80}"
+CRIT_PCT="${DSH_DISK_CRIT_PCT:-90}"
+QUIET=0
+[[ "${1:-}" == "--quiet" ]] && QUIET=1
+
+read -r PCT USED AVAIL SIZE < <(
+  df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5, $3, $4, $2}'
+)
+USED_H=$(numfmt --to=iec --suffix=B $((USED*1024)) 2>/dev/null || echo "${USED}K")
+AVAIL_H=$(numfmt --to=iec --suffix=B $((AVAIL*1024)) 2>/dev/null || echo "${AVAIL}K")
+
+if (( QUIET == 1 && PCT < WARN_PCT )); then exit 0; fi
+
+STATUS="OK"; (( PCT >= WARN_PCT )) && STATUS="AVISO"; (( PCT >= CRIT_PCT )) && STATUS="CRITICO"
+
+echo "==============================================================="
+echo " disco /  [$STATUS]  ${PCT}% usado  (${USED_H} de ${SIZE}K, ${AVAIL_H} libres)"
+echo " $(date -Is)"
+echo "==============================================================="
+
+echo
+echo "## Mayores consumidores (top 12, mismo sistema de ficheros)"
+du -xhd2 "$HOME" 2>/dev/null | sort -rh | head -12
+
+echo
+echo "## Docker"
+if command -v docker >/dev/null 2>&1; then
+  docker system df 2>/dev/null || echo "  (docker no responde)"
+else
+  echo "  (docker no instalado)"
+fi
+
+echo
+echo "## Cachés regenerables"
+for p in "$HOME/.npm" "$HOME/.cache" "$HOME/.local/share/pnpm" \
+         /var/cache/apt "$HOME/.dsh/sessions" "$HOME/dsh-backups"; do
+  [[ -e "$p" ]] && du -xsh "$p" 2>/dev/null
+done
+
+echo
+echo "## Ficheros >200M abiertos y borrados (espacio fantasma)"
+sudo -n lsof -nP 2>/dev/null | awk '$0 ~ /deleted/ {s+=$7} END {if (s>0) printf "  %.2f GB retenidos por procesos\n", s/1073741824; else print "  ninguno"}'
+
+echo
+echo "## Acciones sugeridas"
+echo "  docker builder prune -af          # caché de build (crece rápido)"
+echo "  docker image prune -f             # capas colgantes"
+echo "  pnpm store prune && npm cache clean --force"
+echo "  sudo apt-get clean"
+echo "  sudo truncate -s 0 /var/log/btmp  # intentos de login fallidos"
+exit 0
