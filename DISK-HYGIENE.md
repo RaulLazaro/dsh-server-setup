@@ -110,6 +110,23 @@ find /tmp -maxdepth 1 -mtime +3 -exec rm -rf {} +
 sudo journalctl --vacuum-size=200M
 ```
 
+**Check for a running build first.** A `compose build` in flight both adds cache
+and *replaces* the layers it is reusing, so the percentage moves in both
+directions while you are cleaning. During the 2026-10-14 cleanup the host went
+from 82% to 66%, then back up to 67% within four hours purely from builds
+started by other work. Read the trend, not a single sample:
+
+```bash
+docker ps --format '{{.Names}}' | grep -i buildx     # is a build running?
+ps aux | grep -E 'buildx|buildkit' | grep -v grep
+```
+
+The guard is safe under a running build: `builder prune` never touches cache
+entries that are currently in use, and `image prune -f` only removes *dangling*
+images (never a tagged image, never one behind a container). That is exactly why
+`-a` is not automated.
+
+
 Freeing space does **not** free it instantly if a process still holds a deleted
 file open. Check with:
 
