@@ -49,6 +49,15 @@ if (( BUILD_CACHE_MAX_H > 0 )) && (( has_docker )); then
   docker builder prune -f --filter "until=${BUILD_CACHE_MAX_H}h" >>"$LOG" 2>&1
 fi
 
+# --- 1b. dangling images (daily) --------------------------------------------
+# Completed build stages leave untagged images behind. `-f` alone never removes
+# a tagged image nor one behind a container, only these; the age filter keeps an
+# in-flight build's intermediates safe.
+if (( has_docker )); then
+  log "  imagenes colgantes > 24h"
+  docker image prune -f --filter "until=24h" >>"$LOG" 2>&1
+fi
+
 # --- 2. build cache by size (weekly) — the durable ceiling -------------------
 if (( BUILD_CACHE_MAX_GB > 0 )) && (( has_docker )); then
   WEEK=$(date +%G-W%V)
