@@ -144,6 +144,23 @@ file open. Check with:
 sudo lsof -nP | awk '/deleted/ {s+=$7} END {printf "%.2f GB\n", s/1073741824}'
 ```
 
+## Reading `docker system df`
+
+The four rows are not a clean partition of the disk and the "RECLAIMABLE" column
+is not "free if you prune everything now":
+
+- **Build Cache** reports the logical sum of cache entries, which share layers.
+  It routinely reads 30 GB higher than the space pruning actually returns.
+- **Images "reclaimable"** counts images that no container references *right
+  now*, including the previous version of an image you just rebuilt. Those come
+  back on the next rollback, and `image prune -f` will not touch them — only
+  `-a` would, which is why it is not automated.
+- **Volumes "reclaimable"** belongs to databases that are merely stopped. Treat
+  it as data, never as waste.
+
+So: use the *percentage* from `df` as the trigger, `du` to rank directories, and
+`docker system df` only to identify which kind of waste is growing.
+
 ## `du` versus `df`
 
 `du -xsh /` reports roughly half of what `df` does on this host (32 GB vs
