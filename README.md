@@ -464,18 +464,21 @@ pre-plugin standalone process and is no longer wired into `run.sh`.
 
 The Docker build cache silently grows to tens of GB: on 2026-10-14 it was
 40.9 GB of a 96 GB disk, and `/var/lib/docker` alone was 44 GB — over half of
-all used space. A one-off cleanup reclaimed 18 GB; the rules that keep it from
-coming back are installed by:
+all used space. It had already caused an `ENOSPC` mid-deploy at 45 GB. One
+cleanup reclaimed 18 GB; the rules that keep it from coming back are installed
+by:
 
 ```bash
 sudo ./scripts/install-disk-hygiene.sh
 ```
 
 That installs `~/.local/bin/dsh-disk-guard` plus a daily systemd timer
-(06:30 UTC and 5 min after boot) that drops build cache older than 72 h, prunes
-dangling images, caps `/var/log/btmp`, and writes an alert report to
-`~/.local/state/dsh/disk-guard.log` past 80% usage. Check the current state at
-any time with `~/.local/bin/dsh-disk-report`.
+(06:30 UTC and 5 min after boot). The build cache is bounded twice — 72 h of age
+daily, and a **20 GB hard ceiling** (`--max-used-space`) weekly, which is the
+rule that actually holds. The guard also prunes dangling images, caps
+`/var/log/btmp`, and writes an alert report to `~/.local/state/dsh/disk-guard.log`
+past 80% usage. Check the current state at any time with
+`~/.local/bin/dsh-disk-report`.
 
 The reasoning, the measured numbers and the standing rules are in
 [DISK-HYGIENE.md](DISK-HYGIENE.md).

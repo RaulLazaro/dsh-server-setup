@@ -14,6 +14,17 @@
     delaycompress
 }
 
+# DSH branch backup: one tarball per backup run, rotated so a week of runs
+# cannot accumulate (each one carries ~500 MB of node_modules).
+/home/YOUR_USER/dsh-backups/*/dsh-home.tar.gz {
+    weekly
+    rotate 2
+    maxsize 1G
+    missingok
+    notifempty
+    compress
+}
+
 # Guard log: keep it small and bounded.
 /home/YOUR_USER/.local/state/dsh/*.log {
     weekly

@@ -63,7 +63,11 @@ add several GB, and nothing ever removed the old layers.
 ## The standing rules
 
 1. **Docker build cache is the default suspect.** Check `docker system df`
-   before anything else. The guard drops cache older than 72 h.
+   before anything else. It is bounded twice over: cache older than 72 h is
+   dropped daily, and a **20 GB hard ceiling** (`--max-used-space 20GB`) is
+   enforced weekly. The size cap is the one that matters — an age-only rule
+   still lets a burst of builds inside one day reach tens of GB. Recorded
+   incidents: 45 GB build cache, 40.9 GB build cache, `ENOSPC` mid-deploy.
 2. **Never `docker system prune -a` on this host.** It would remove the images
    behind containers that are legitimately stopped (coolify, pangolin, the
    project stacks). The guard only ever prunes *dangling* images and cache.
@@ -72,17 +76,22 @@ add several GB, and nothing ever removed the old layers.
    during a deploy costs a full rebuild.
 4. **`btmp` is capped.** An internet-facing SSH port fills it with failed
    logins; it is rotated monthly and truncated past 50 MB. It is a symptom, not
-   a bug — the attack surface itself is handled by crowdsec.
+   a bug — the attack surface itself belongs to the firewall.
 5. **The journal is bounded** to 200 MB / 1 month (default `SystemMaxUse` is
    10% of the filesystem, which silently grows with the disk).
 6. **Work in `/tmp` is scratch.** Anything older than 3 days is deleted; move
    deliverables out instead of citing them from `/tmp`.
 7. **One-off backups do not accumulate in `~`.** A backup is removed once it is
    superseded; `dsh-backups/` is not a dump for restored trees that were never
-   deleted.
+   deleted. Branch backups are rotated too (weekly, 2 kept, 1 GB cap) — each
+   `dsh-home.tar.gz` carries ~500 MB of `node_modules`.
 8. **Caches that belong to a project are not disk-hygiene targets.**
    `~/.cache/camoufox`, `~/.cache/ms-playwright` and `node_modules` are
    re-download costs, not savings. Measure before deleting.
+9. **Know how much free space a deploy needs.** A build cannot finish without
+   room for its own layers, so keeping 20-30% free is a deploy prerequisite, not
+   a comfort margin.
+
 
 ## Environment variables
 
@@ -94,6 +103,7 @@ Set in `dsh-disk-guard.service`:
 | `DSH_DISK_PRUNE_PCT` | `85` | Run the cheap prunes at/above this usage |
 | `DSH_DISK_AUTOPRUNE` | `off` | `on` also runs `docker builder prune -af` |
 | `DSH_BUILD_CACHE_MAX_H` | `0` | Drop build cache older than N hours (`0` = never) |
+| `DSH_BUILD_CACHE_MAX_GB` | `0` | Hard build-cache ceiling in GB, enforced weekly (`0` = never) |
 
 ## Manual recovery when the disk is critically full
 

@@ -9,6 +9,9 @@ Type=oneshot
 User=YOUR_USER
 # Drop stale Docker build cache after 72h (see DISK-HYGIENE.md).
 Environment=DSH_BUILD_CACHE_MAX_H=72
+# Hard ceiling on the build cache, enforced weekly. This is the rule that
+# actually prevents the 45 GB cache that filled the disk.
+Environment=DSH_BUILD_CACHE_MAX_GB=20
 # Warn at 80%; run the cheap prunes at 85%.
 Environment=DSH_DISK_WARN_PCT=80
 Environment=DSH_DISK_PRUNE_PCT=85
