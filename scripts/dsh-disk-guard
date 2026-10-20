@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# dsh-disk-guard — watches disk usage and contains the places that grow.
+#
+# Two independent layers keep the Docker build cache bounded:
+#   - age  (daily):  drop cache older than DSH_BUILD_CACHE_MAX_H hours
+#   - size (weekly): hard ceiling via DSH_BUILD_CACHE_MAX_GB
+# The size cap is the one that matters: an age-only rule lets a burst of builds
+# inside a single day grow the cache to tens of GB (measured: 45 GB, ENOSPC).
+#
+# Policy knobs (set in dsh-disk-guard.service):
+#   DSH_DISK_WARN_PCT        warn threshold             (default 80)
+#   DSH_DISK_PRUNE_PCT       cheap-prune threshold      (default 85)
+#   DSH_DISK_AUTOPRUNE       on|off full cache wipe     (default off)
+#   DSH_BUILD_CACHE_MAX_H    max cache age in hours     (default 0 = skip)
+#   DSH_BUILD_CACHE_MAX_GB   hard cache ceiling in GB   (default 0 = skip)
+#
+# Only ever prunes *dangling* images and build cache. Never `system prune -a`.
+set -uo pipefail
+
+STATE_DIR="${DSH_STATE_DIR:-$HOME/.local/state/dsh}"
+LOG="$STATE_DIR/disk-guard.log"
+STAMP_WEEK="$STATE_DIR/.last-builder-cap"
+REPORT="${DSH_DISK_REPORT:-$HOME/.local/bin/dsh-disk-report}"
+WARN_PCT="${DSH_DISK_WARN_PCT:-80}"
+PRUNE_PCT="${DSH_DISK_PRUNE_PCT:-85}"
+AUTOPRUNE="${DSH_DISK_AUTOPRUNE:-off}"
+BUILD_CACHE_MAX_H="${DSH_BUILD_CACHE_MAX_H:-0}"
+BUILD_CACHE_MAX_GB="${DSH_BUILD_CACHE_MAX_GB:-0}"
+
+mkdir -p "$STATE_DIR"
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
+
+# Keep the log itself bounded even if logrotate is not installed.
+if [[ -f "$LOG" ]] && (( $(stat -c%s "$LOG") > 524288 )); then
+  tail -n 2000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+
+read -r PCT AVAIL < <(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5, $4}')
+AVAIL_H=$(numfmt --to=iec --suffix=B $((AVAIL*1024)) 2>/dev/null || echo "${AVAIL}K")
+PCT_BEFORE="$PCT"
+log "disco /: ${PCT}% usado, ${AVAIL_H} libres"
+
+has_docker=0
+command -v docker >/dev/null 2>&1 && has_docker=1
+
+# --- 1. build cache by age (daily) ------------------------------------------
+if (( BUILD_CACHE_MAX_H > 0 )) && (( has_docker )); then
+  log "  cache de build > ${BUILD_CACHE_MAX_H}h"
+  docker builder prune -f --filter "until=${BUILD_CACHE_MAX_H}h" >>"$LOG" 2>&1
+fi
+
+# --- 1b. dangling images (daily) --------------------------------------------
+# Completed build stages leave untagged images behind. `-f` alone never removes
+# a tagged image nor one behind a container, only these; the age filter keeps an
+# in-flight build's intermediates safe.
+if (( has_docker )); then
+  log "  imagenes colgantes > 24h"
+  docker image prune -f --filter "until=24h" >>"$LOG" 2>&1
+fi
+
+# --- 2. build cache by size (weekly) — the durable ceiling -------------------
+if (( BUILD_CACHE_MAX_GB > 0 )) && (( has_docker )); then
+  WEEK=$(date +%G-W%V)
+  if [[ "$(cat "$STAMP_WEEK" 2>/dev/null)" != "$WEEK" ]]; then
+    log "  techo de cache de build: ${BUILD_CACHE_MAX_GB}GB (semana $WEEK)"
+    docker builder prune -f --max-used-space "${BUILD_CACHE_MAX_GB}GB" >>"$LOG" 2>&1
+    printf '%s\n' "$WEEK" >"$STAMP_WEEK"
+  fi
+fi
+
+# --- 3. above the prune threshold: dangling layers + cheap caches ------------
+if (( PCT >= PRUNE_PCT )) && (( has_docker )); then
+  log "  umbral ${PRUNE_PCT}%: poda de imagenes colgantes"
+  docker image prune -f >>"$LOG" 2>&1
+  if [[ "$AUTOPRUNE" == "on" ]]; then
+    log "  AUTOPRUNE on: purga completa de la cache de build"
+    docker builder prune -af >>"$LOG" 2>&1
+  fi
+fi
+
+if (( PCT >= PRUNE_PCT )); then
+  command -v pnpm >/dev/null 2>&1 && pnpm store prune >>"$LOG" 2>&1
+  command -v npm  >/dev/null 2>&1 && npm cache clean --force >>"$LOG" 2>&1
+  sudo -n apt-get clean >>"$LOG" 2>&1
+  find /tmp -maxdepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null
+fi
+
+# --- 4. btmp: one line per failed login -------------------------------------
+if [[ -f /var/log/btmp ]] && (( $(sudo -n stat -c%s /var/log/btmp 2>/dev/null || echo 0) > 52428800 )); then
+  log "  btmp > 50M: se trunca"
+  sudo -n truncate -s 0 /var/log/btmp
+fi
+
+# --- 5. alert ---------------------------------------------------------------
+if (( PCT >= WARN_PCT )); then
+  log "  AVISO: ${PCT}% >= ${WARN_PCT}%"
+  "$REPORT" --quiet 2>/dev/null | sed "s/^/  /" >>"$LOG"
+fi
+
+read -r PCT2 < <(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+(( PCT2 != PCT_BEFORE )) && log "resultado: ${PCT_BEFORE}% -> ${PCT2}%"
+exit 0

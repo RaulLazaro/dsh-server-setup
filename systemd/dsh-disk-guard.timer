@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the disk guard daily and shortly after boot
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 UTC
+OnBootSec=5min
+# Catch up if the host was off at the scheduled time.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Disk usage watch and containment (DSH host)
+Documentation=file:///home/YOUR_USER/workspace/dsh-server-setup/DISK-HYGIENE.md
+After=network-online.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+# Drop stale Docker build cache after 72h (see DISK-HYGIENE.md).
+Environment=DSH_BUILD_CACHE_MAX_H=72
+# Hard ceiling on the build cache, enforced weekly. This is the rule that
+# actually prevents the 45 GB cache that filled the disk.
+Environment=DSH_BUILD_CACHE_MAX_GB=20
+# Warn at 80%; run the cheap prunes at 85%.
+Environment=DSH_DISK_WARN_PCT=80
+Environment=DSH_DISK_PRUNE_PCT=85
+# off = never run `docker builder prune -af` unattended; the guard still prunes
+# dangling images and regenerable caches once the threshold is crossed.
+Environment=DSH_DISK_AUTOPRUNE=off
+ExecStart=/home/YOUR_USER/.local/bin/dsh-disk-guard
